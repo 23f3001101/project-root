@@ -1,56 +1,70 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import numpy as np
+from typing import List
 import json
 import os
+import numpy as np
 
 app = FastAPI()
 
-# Enable CORS for all origins and POST methods
+# 1. Standard CORS Middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["POST", "OPTIONS"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Load the telemetry data
-# Vercel places the root files in the same relative path
-data_path = os.path.join(os.path.dirname(__file__), "..", "telemetry.json")
+# 2. Load the data from YOUR telemetry.json
+# This path works on Vercel to find files in the project root
+data_path = os.path.join(os.getcwd(), "telemetry.json")
 with open(data_path, "r") as f:
-    telemetry_data = json.load(f)
+    raw_data = json.load(f)
 
-class LatencyQuery(BaseModel):
-    regions: list[str]
+class MetricsRequest(BaseModel):
+    regions: List[str]
     threshold_ms: float
 
+# 3. Manual OPTIONS handler (Sometimes needed to satisfy strict CORS tests)
+@app.options("/api/metrics")
+async def preflight():
+    return Response(
+        status_code=200,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+        },
+    )
+
 @app.post("/api/metrics")
-async def get_metrics(query: LatencyQuery):
-    response = {}
+async def get_metrics(req: MetricsRequest):
+    output = {}
     
-    for reg in query.regions:
-        # Filter records for the current region
-        subset = [d for d in telemetry_data if d['region'] == reg]
+    for region_name in req.regions:
+        # Filter the JSON data for the specific region
+        region_subset = [d for d in raw_data if d['region'] == region_name]
         
-        if not subset:
+        if not region_subset:
             continue
             
-        latencies = [d['latency_ms'] for d in subset]
-        uptimes = [d['uptime_pct'] for d in subset]
+        lats = [d['latency_ms'] for d in region_subset]
+        uptimes = [d['uptime_pct'] for d in region_subset]
         
-        # Calculate statistics
-        avg_lat = float(np.mean(latencies))
-        p95_lat = float(np.percentile(latencies, 95))
+        # Calculate exactly as required
+        avg_lat = float(np.mean(lats))
+        p95_lat = float(np.percentile(lats, 95))
         avg_uptime = float(np.mean(uptimes))
-        breaches = sum(1 for lat in latencies if lat > query.threshold_ms)
+        # Breaches: Count of records where latency is STRICTLY ABOVE threshold
+        breaches_count = sum(1 for lat in lats if lat > req.threshold_ms)
         
-        response[reg] = {
-            "avg_latency": avg_lat,
-            "p95_latency": p95_lat,
-            "avg_uptime": avg_uptime,
-            "breaches": breaches
+        output[region_name] = {
+            "avg_latency": round(avg_lat, 2),
+            "p95_latency": round(p95_lat, 2),
+            "avg_uptime": round(avg_uptime, 4),
+            "breaches": breaches_count
         }
         
-    return response
+    return output
