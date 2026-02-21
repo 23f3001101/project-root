@@ -1,15 +1,6 @@
 {
-  "headers": [
-    {
-      "source": "/api/metrics",
-      "headers": [
-        { "key": "Access-Control-Allow-Origin", "value": "*" },
-        { "key": "Access-Control-Allow-Methods", "value": "POST, OPTIONS" },
-        { "key": "Access-Control-Allow-Headers", "value": "*" }
-      ]
-    }
-  ],
   "rewrites": [
-    { "source": "/api/metrics", "destination": "/api/index.py" }
+    { "source": "/api/metrics", "destination": "/api/index.py" },
+    { "source": "/(.*)", "destination": "/api/index.py" }
   ]
 }
