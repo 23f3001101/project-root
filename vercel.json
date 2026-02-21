@@ -1,6 +1,6 @@
 {
   "rewrites": [
-    { "source": "/api/metrics", "destination": "/api/index.py" },
-    { "source": "/(.*)", "destination": "/api/index.py" }
+    { "source": "/api/latency", "destination": "/api/main.py" },
+    { "source": "/(.*)", "destination": "/api/main.py" }
   ]
 }
