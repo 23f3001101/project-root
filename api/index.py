@@ -1,8 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Dict
-import pandas as pd
+import numpy as np
+import json
 import os
 
 app = FastAPI()
@@ -11,41 +11,46 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
-# Load data into memory (Ensure telemetry.csv is in the root or same folder)
-# Vercel's current working directory is the project root
-csv_path = os.path.join(os.getcwd(), "telemetry.csv")
-df = pd.read_csv(csv_path)
+# Load the telemetry data
+# Vercel places the root files in the same relative path
+data_path = os.path.join(os.path.dirname(__file__), "..", "telemetry.json")
+with open(data_path, "r") as f:
+    telemetry_data = json.load(f)
 
-class LatencyRequest(BaseModel):
-    regions: List[str]
-    threshold_ms: int
+class LatencyQuery(BaseModel):
+    regions: list[str]
+    threshold_ms: float
 
 @app.post("/api/metrics")
-async def calculate_metrics(request: LatencyRequest):
-    response_data = {}
+async def get_metrics(query: LatencyQuery):
+    response = {}
     
-    for region in request.regions:
-        # Filter dataframe by region
-        region_data = df[df['region'] == region]
+    for reg in query.regions:
+        # Filter records for the current region
+        subset = [d for d in telemetry_data if d['region'] == reg]
         
-        if region_data.empty:
+        if not subset:
             continue
             
-        # Calculate Metrics
-        avg_lat = region_data['latency_ms'].mean()
-        p95_lat = region_data['latency_ms'].quantile(0.95)
-        avg_uptime = region_data['uptime'].mean()
-        breaches = int((region_data['latency_ms'] > request.threshold_ms).sum())
+        latencies = [d['latency_ms'] for d in subset]
+        uptimes = [d['uptime_pct'] for d in subset]
         
-        response_data[region] = {
-            "avg_latency": float(round(avg_lat, 2)),
-            "p95_latency": float(round(p95_lat, 2)),
-            "avg_uptime": float(round(avg_uptime, 4)),
+        # Calculate statistics
+        avg_lat = float(np.mean(latencies))
+        p95_lat = float(np.percentile(latencies, 95))
+        avg_uptime = float(np.mean(uptimes))
+        breaches = sum(1 for lat in latencies if lat > query.threshold_ms)
+        
+        response[reg] = {
+            "avg_latency": avg_lat,
+            "p95_latency": p95_lat,
+            "avg_uptime": avg_uptime,
             "breaches": breaches
         }
         
-    return response_data
+    return response
